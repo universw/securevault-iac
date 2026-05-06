@@ -2,13 +2,19 @@ const express = require("express");
 const cors = require("cors");
 const { randomUUID } = require("crypto");
 
-const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+} = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const {
   DynamoDBDocumentClient,
   PutCommand,
   QueryCommand,
+  GetCommand,
   DeleteCommand,
   UpdateCommand,
 } = require("@aws-sdk/lib-dynamodb");
@@ -110,6 +116,43 @@ app.post("/files/:userId/:fileId/confirm", async (req, res) => {
   } catch (error) {
     console.error("confirm upload error:", error);
     res.status(500).json({ error: "Failed to confirm upload" });
+  }
+});
+
+app.get("/download-url/:userId/:fileId", async (req, res) => {
+  try {
+    const { userId, fileId } = req.params;
+
+    const result = await ddb.send(
+      new GetCommand({
+        TableName: FILES_TABLE,
+        Key: { userId, fileId },
+      })
+    );
+
+    if (!result.Item) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    if (result.Item.status !== "uploaded") {
+      return res.status(400).json({ error: "File has not been uploaded yet" });
+    }
+
+    const command = new GetObjectCommand({
+      Bucket: FILES_BUCKET,
+      Key: result.Item.s3Key,
+    });
+
+    const downloadUrl = await getSignedUrl(s3, command, { expiresIn: 300 });
+
+    res.json({
+      fileId,
+      fileName: result.Item.fileName,
+      downloadUrl,
+    });
+  } catch (error) {
+    console.error("download-url error:", error);
+    res.status(500).json({ error: "Failed to create download URL" });
   }
 });
 
