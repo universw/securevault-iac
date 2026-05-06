@@ -9,7 +9,7 @@ resource "aws_cognito_user_pool" "securevault_users" {
     minimum_length    = 8
     require_lowercase = true
     require_numbers   = true
-    require_symbols   = false
+    require_symbols   = true
     require_uppercase = true
   }
 
@@ -25,6 +25,8 @@ resource "aws_cognito_user_pool_client" "securevault_app_client" {
   user_pool_id = aws_cognito_user_pool.securevault_users.id
 
   generate_secret = false
+
+  prevent_user_existence_errors = "ENABLED"
 
   explicit_auth_flows = [
     "ALLOW_USER_PASSWORD_AUTH",

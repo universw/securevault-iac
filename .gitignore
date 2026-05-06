@@ -1,12 +1,45 @@
-node_modules
-.env
+# OS/editor
 .DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.sw?
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.local
+
+# Dependencies and build output
+node_modules/
+dist/
+dist-ssr/
+coverage/
 
 # Terraform
-.terraform
+**/.terraform/
 *.tfstate
 *.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
 terraform.tfvars
+terraform.tfvars.json
 
 # Logs
-npm-debug.log*.txt
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*

@@ -6,7 +6,8 @@ import {
 } from "amazon-cognito-identity-js";
 import "./App.css";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "");
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? "/api" : ""))
+  .replace(/\/$/, "");
 const COGNITO_USER_POOL_ID = import.meta.env.VITE_COGNITO_USER_POOL_ID;
 const COGNITO_CLIENT_ID = import.meta.env.VITE_COGNITO_CLIENT_ID;
 const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
@@ -48,7 +49,10 @@ function App() {
   const uploadedCount = files.filter((file) => file.status === "uploaded").length;
   const pendingCount = files.length - uploadedCount;
   const latestFile = getLatestFile(files);
-  const totalStoredBytes = files.reduce((total, file) => total + Number(file.size || 0), 0);
+  const totalStoredBytes = files.reduce(
+    (total, file) => total + Number(file.fileSize || file.size || 0),
+    0
+  );
 
   const visibleFiles = useMemo(() => {
     return files
@@ -183,6 +187,14 @@ function App() {
         showMessage(err.message || "Login failed.", "error");
         setLoading(false);
       },
+      newPasswordRequired: () => {
+        showMessage("This account requires a password change before login.", "error");
+        setLoading(false);
+      },
+      mfaRequired: () => {
+        showMessage("MFA is required, but this client does not support MFA yet.", "error");
+        setLoading(false);
+      },
     });
   };
 
@@ -279,6 +291,7 @@ function App() {
         body: JSON.stringify({
           fileName: selectedFile.name.trim(),
           contentType: selectedFile.type || "application/octet-stream",
+          fileSize: selectedFile.size,
         }),
       });
 
@@ -678,6 +691,7 @@ function App() {
                           {file.status || "unknown"}
                         </span>
                         <span>{formatDate(file.uploadedAt || file.createdAt)}</span>
+                        {file.fileSize && <span>{formatBytes(file.fileSize)}</span>}
                         {file.contentType && <span>{file.contentType}</span>}
                       </div>
                     </div>
@@ -801,6 +815,10 @@ function FileDetails({
         <div>
           <dt>Type</dt>
           <dd>{file.contentType || inferTypeLabel(file.fileName)}</dd>
+        </div>
+        <div>
+          <dt>Size</dt>
+          <dd>{file.fileSize ? formatBytes(file.fileSize) : "Unknown size"}</dd>
         </div>
         <div>
           <dt>Created</dt>

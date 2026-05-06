@@ -47,6 +47,7 @@ output "backend_alb_url" {
   description = "Stable ALB URL for SecureVault backend"
   value       = "http://${aws_lb.securevault_alb.dns_name}"
 }
+
 output "backend_api_gateway_url" {
   description = "HTTPS API Gateway URL for SecureVault backend"
   value       = aws_apigatewayv2_api.securevault_http_api.api_endpoint

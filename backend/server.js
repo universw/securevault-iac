@@ -10,6 +10,7 @@ const {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  HeadObjectCommand,
 } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
@@ -30,9 +31,16 @@ const FILES_BUCKET = process.env.FILES_BUCKET;
 const FILES_TABLE = process.env.FILES_TABLE;
 const COGNITO_USER_POOL_ID = process.env.COGNITO_USER_POOL_ID;
 const COGNITO_CLIENT_ID = process.env.COGNITO_CLIENT_ID;
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || "http://localhost:5173")
+const MAX_FILE_SIZE_BYTES = Number(process.env.MAX_FILE_SIZE_BYTES || 25 * 1024 * 1024);
+const DEFAULT_CORS_ORIGINS = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:5174",
+  "https://securevault-iac.vercel.app",
+];
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS.join(","))
   .split(",")
-  .map((origin) => origin.trim())
+  .map((origin) => normalizeOrigin(origin))
   .filter(Boolean);
 
 const missingConfig = [
@@ -58,7 +66,7 @@ const verifier = CognitoJwtVerifier.create({
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || CORS_ORIGINS.includes(origin)) {
+      if (!origin || CORS_ORIGINS.includes(normalizeOrigin(origin))) {
         callback(null, true);
         return;
       }
@@ -97,6 +105,19 @@ function getAuthenticatedUserId(req) {
   return req.user.userId;
 }
 
+function normalizeOrigin(origin) {
+  return origin.trim().replace(/\/$/, "").toLowerCase();
+}
+
+function normalizeFileName(fileName) {
+  return fileName
+    .trim()
+    .replace(/[/\\]/g, "-")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
+    .slice(0, 255);
+}
+
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
@@ -108,12 +129,19 @@ app.get("/health", (req, res) => {
 app.post("/upload-url", authenticate, async (req, res) => {
   try {
     const { fileName, contentType } = req.body;
+    const fileSize = Number(req.body.fileSize);
     const userId = getAuthenticatedUserId(req);
-    const safeFileName = typeof fileName === "string" ? fileName.trim() : "";
+    const safeFileName = typeof fileName === "string" ? normalizeFileName(fileName) : "";
 
-    if (!safeFileName || !contentType) {
+    if (!safeFileName || !contentType || !Number.isFinite(fileSize)) {
       return res.status(400).json({
-        error: "fileName and contentType are required",
+        error: "fileName, contentType, and fileSize are required",
+      });
+    }
+
+    if (fileSize <= 0 || fileSize > MAX_FILE_SIZE_BYTES) {
+      return res.status(400).json({
+        error: `File must be between 1 byte and ${MAX_FILE_SIZE_BYTES} bytes`,
       });
     }
 
@@ -136,6 +164,7 @@ app.post("/upload-url", authenticate, async (req, res) => {
           fileId,
           fileName: safeFileName,
           contentType,
+          fileSize,
           s3Key,
           status: "pending",
           createdAt: new Date().toISOString(),
@@ -160,11 +189,45 @@ app.post("/files/:fileId/confirm", authenticate, async (req, res) => {
     const { fileId } = req.params;
     const userId = getAuthenticatedUserId(req);
 
+    const result = await ddb.send(
+      new GetCommand({
+        TableName: FILES_TABLE,
+        Key: { userId, fileId },
+      })
+    );
+
+    if (!result.Item) {
+      return res.status(404).json({ error: "File upload record not found" });
+    }
+
+    if (!result.Item.s3Key) {
+      return res.status(400).json({ error: "File metadata has no S3 key" });
+    }
+
+    const objectHead = await s3.send(
+      new HeadObjectCommand({
+        Bucket: FILES_BUCKET,
+        Key: result.Item.s3Key,
+      })
+    );
+
+    if (Number(objectHead.ContentLength || 0) !== Number(result.Item.fileSize || 0)) {
+      return res.status(400).json({ error: "Uploaded file size does not match metadata" });
+    }
+
+    if (
+      result.Item.contentType &&
+      objectHead.ContentType &&
+      objectHead.ContentType !== result.Item.contentType
+    ) {
+      return res.status(400).json({ error: "Uploaded file type does not match metadata" });
+    }
+
     await ddb.send(
       new UpdateCommand({
         TableName: FILES_TABLE,
         Key: { userId, fileId },
-        UpdateExpression: "SET #status = :status, uploadedAt = :uploadedAt",
+        UpdateExpression: "SET #status = :status, uploadedAt = :uploadedAt, fileSize = :fileSize",
         ConditionExpression: "attribute_exists(userId) AND attribute_exists(fileId)",
         ExpressionAttributeNames: {
           "#status": "status",
@@ -172,6 +235,7 @@ app.post("/files/:fileId/confirm", authenticate, async (req, res) => {
         ExpressionAttributeValues: {
           ":status": "uploaded",
           ":uploadedAt": new Date().toISOString(),
+          ":fileSize": objectHead.ContentLength || result.Item.fileSize,
         },
       })
     );
@@ -181,6 +245,7 @@ app.post("/files/:fileId/confirm", authenticate, async (req, res) => {
       userId,
       fileId,
       status: "uploaded",
+      fileSize: objectHead.ContentLength || result.Item.fileSize,
     });
   } catch (error) {
     console.error("confirm upload error:", error);

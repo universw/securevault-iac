@@ -32,6 +32,14 @@ resource "aws_s3_bucket_public_access_block" "securevault_files" {
   restrict_public_buckets = true
 }
 
+resource "aws_s3_bucket_ownership_controls" "securevault_files" {
+  bucket = aws_s3_bucket.securevault_files.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
 resource "aws_s3_bucket_server_side_encryption_configuration" "securevault_files" {
   bucket = aws_s3_bucket.securevault_files.id
 
@@ -63,4 +71,29 @@ resource "aws_s3_bucket_cors_configuration" "securevault_files_cors" {
     expose_headers  = ["ETag"]
     max_age_seconds = 3000
   }
+}
+
+resource "aws_s3_bucket_policy" "securevault_files_tls_only" {
+  bucket = aws_s3_bucket.securevault_files.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyInsecureTransport"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.securevault_files.arn,
+          "${aws_s3_bucket.securevault_files.arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }
+    ]
+  })
 }
