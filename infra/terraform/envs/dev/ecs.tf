@@ -21,7 +21,7 @@ resource "aws_ecs_task_definition" "securevault_backend_task" {
   cpu    = "256"
   memory = "512"
 
-  execution_role_arn = aws_iam_role.securevault_backend_task_role.arn
+  execution_role_arn = aws_iam_role.securevault_backend_execution_role.arn
   task_role_arn      = aws_iam_role.securevault_backend_task_role.arn
 
   container_definitions = jsonencode([
@@ -54,6 +54,10 @@ resource "aws_ecs_task_definition" "securevault_backend_task" {
         {
           name  = "NODE_ENV"
           value = "dev"
+        },
+        {
+          name  = "CORS_ORIGINS"
+          value = "http://localhost:5173,https://securevault-iac.vercel.app"
         }
       ]
 

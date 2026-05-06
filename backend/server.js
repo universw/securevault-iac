@@ -1,3 +1,5 @@
+require("dotenv").config({ quiet: true });
+
 const express = require("express");
 const cors = require("cors");
 const { randomUUID } = require("crypto");
@@ -28,6 +30,21 @@ const FILES_BUCKET = process.env.FILES_BUCKET;
 const FILES_TABLE = process.env.FILES_TABLE;
 const COGNITO_USER_POOL_ID = process.env.COGNITO_USER_POOL_ID;
 const COGNITO_CLIENT_ID = process.env.COGNITO_CLIENT_ID;
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || "http://localhost:5173")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const missingConfig = [
+  !FILES_BUCKET && "FILES_BUCKET",
+  !FILES_TABLE && "FILES_TABLE",
+  !COGNITO_USER_POOL_ID && "COGNITO_USER_POOL_ID",
+  !COGNITO_CLIENT_ID && "COGNITO_CLIENT_ID",
+].filter(Boolean);
+
+if (missingConfig.length > 0) {
+  throw new Error(`Missing backend configuration: ${missingConfig.join(", ")}`);
+}
 
 const s3 = new S3Client({ region: AWS_REGION });
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: AWS_REGION }));
@@ -38,7 +55,18 @@ const verifier = CognitoJwtVerifier.create({
   clientId: COGNITO_CLIENT_ID,
 });
 
-app.use(cors());
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || CORS_ORIGINS.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("Origin is not allowed by CORS"));
+    },
+  })
+);
 app.use(express.json());
 
 async function authenticate(req, res, next) {
@@ -81,15 +109,16 @@ app.post("/upload-url", authenticate, async (req, res) => {
   try {
     const { fileName, contentType } = req.body;
     const userId = getAuthenticatedUserId(req);
+    const safeFileName = typeof fileName === "string" ? fileName.trim() : "";
 
-    if (!fileName || !contentType) {
+    if (!safeFileName || !contentType) {
       return res.status(400).json({
         error: "fileName and contentType are required",
       });
     }
 
     const fileId = randomUUID();
-    const s3Key = `${userId}/${fileId}-${fileName}`;
+    const s3Key = `${userId}/${fileId}-${safeFileName}`;
 
     const command = new PutObjectCommand({
       Bucket: FILES_BUCKET,
@@ -105,7 +134,7 @@ app.post("/upload-url", authenticate, async (req, res) => {
         Item: {
           userId,
           fileId,
-          fileName,
+          fileName: safeFileName,
           contentType,
           s3Key,
           status: "pending",
@@ -136,6 +165,7 @@ app.post("/files/:fileId/confirm", authenticate, async (req, res) => {
         TableName: FILES_TABLE,
         Key: { userId, fileId },
         UpdateExpression: "SET #status = :status, uploadedAt = :uploadedAt",
+        ConditionExpression: "attribute_exists(userId) AND attribute_exists(fileId)",
         ExpressionAttributeNames: {
           "#status": "status",
         },
@@ -154,6 +184,10 @@ app.post("/files/:fileId/confirm", authenticate, async (req, res) => {
     });
   } catch (error) {
     console.error("confirm upload error:", error);
+    if (error.name === "ConditionalCheckFailedException") {
+      return res.status(404).json({ error: "File upload record not found" });
+    }
+
     res.status(500).json({ error: "Failed to confirm upload" });
   }
 });

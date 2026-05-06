@@ -7,7 +7,6 @@ node_modules
 *.tfstate
 *.tfstate.*
 terraform.tfvars
-.terraform.lock.hcl
 
 # Logs
 npm-debug.log*.txt
