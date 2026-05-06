@@ -1,0 +1,13 @@
+node_modules
+.env
+.DS_Store
+
+# Terraform
+.terraform
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+.terraform.lock.hcl
+
+# Logs
+npm-debug.log
