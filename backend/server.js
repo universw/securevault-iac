@@ -178,6 +178,10 @@ app.get("/download-url/:fileId", authenticate, async (req, res) => {
       return res.status(400).json({ error: "File has not been uploaded yet" });
     }
 
+    if (!result.Item.s3Key) {
+      return res.status(400).json({ error: "File metadata has no S3 key" });
+    }
+
     const command = new GetObjectCommand({
       Bucket: FILES_BUCKET,
       Key: result.Item.s3Key,
@@ -233,12 +237,14 @@ app.delete("/files/:fileId", authenticate, async (req, res) => {
       return res.status(404).json({ error: "File not found" });
     }
 
-    await s3.send(
-      new DeleteObjectCommand({
-        Bucket: FILES_BUCKET,
-        Key: result.Item.s3Key,
-      })
-    );
+    if (result.Item.s3Key) {
+      await s3.send(
+        new DeleteObjectCommand({
+          Bucket: FILES_BUCKET,
+          Key: result.Item.s3Key,
+        })
+      );
+    }
 
     await ddb.send(
       new DeleteCommand({
@@ -247,7 +253,11 @@ app.delete("/files/:fileId", authenticate, async (req, res) => {
       })
     );
 
-    res.json({ deleted: true, fileId });
+    res.json({
+      deleted: true,
+      fileId,
+      deletedS3Object: Boolean(result.Item.s3Key),
+    });
   } catch (error) {
     console.error("delete file error:", error);
     res.status(500).json({ error: "Failed to delete file" });
