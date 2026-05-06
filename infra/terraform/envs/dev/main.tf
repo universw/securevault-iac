@@ -49,3 +49,15 @@ resource "aws_s3_bucket_versioning" "securevault_files" {
     status = "Enabled"
   }
 }
+
+resource "aws_s3_bucket_cors_configuration" "securevault_files_cors" {
+  bucket = aws_s3_bucket.securevault_files.id
+
+  cors_rule {
+    allowed_headers = ["*"]
+    allowed_methods = ["GET", "PUT", "POST", "DELETE", "HEAD"]
+    allowed_origins = ["http://localhost:5173"]
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3000
+  }
+}
