@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CognitoUserPool,
   CognitoUser,
   AuthenticationDetails,
 } from "amazon-cognito-identity-js";
+import "./App.css";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -15,12 +16,16 @@ const poolData = {
 const userPool = new CognitoUserPool(poolData);
 
 function App() {
+  const fileInputRef = useRef(null);
+
   const [email, setEmail] = useState("testuser@example.com");
   const [password, setPassword] = useState("");
   const [idToken, setIdToken] = useState(localStorage.getItem("idToken") || "");
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("info");
   const [files, setFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   const isLoggedIn = Boolean(idToken);
 
@@ -30,12 +35,23 @@ function App() {
     }
   }, [idToken]);
 
+  const showMessage = (text, type = "info") => {
+    setMessage(text);
+    setMessageType(type);
+  };
+
   const authHeaders = (token = idToken) => ({
     Authorization: `Bearer ${token}`,
   });
 
   const handleLogin = () => {
-    setMessage("Logging in...");
+    if (!email || !password) {
+      showMessage("Please enter email and password.", "error");
+      return;
+    }
+
+    setLoading(true);
+    showMessage("Signing you in...", "info");
 
     const authDetails = new AuthenticationDetails({
       Username: email,
@@ -50,15 +66,16 @@ function App() {
     cognitoUser.authenticateUser(authDetails, {
       onSuccess: (result) => {
         const token = result.getIdToken().getJwtToken();
-
         localStorage.setItem("idToken", token);
         setIdToken(token);
-        setMessage("Login successful!");
+        setPassword("");
+        showMessage("Login successful.", "success");
+        setLoading(false);
       },
-
       onFailure: (err) => {
         console.error(err);
-        setMessage(err.message || "Login failed");
+        showMessage(err.message || "Login failed.", "error");
+        setLoading(false);
       },
     });
   };
@@ -68,12 +85,12 @@ function App() {
     setIdToken("");
     setFiles([]);
     setSelectedFile(null);
-    setMessage("Logged out");
+    showMessage("Logged out.", "info");
   };
 
   const fetchFiles = async (token = idToken) => {
     try {
-      setMessage("Loading files...");
+      setLoading(true);
 
       const response = await fetch(`${API_BASE_URL}/files`, {
         headers: authHeaders(token),
@@ -82,25 +99,27 @@ function App() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to load files");
+        throw new Error(data.error || "Failed to load files.");
       }
 
       setFiles(data.files || []);
-      setMessage("");
+      setLoading(false);
     } catch (error) {
       console.error(error);
-      setMessage(error.message);
+      showMessage(error.message, "error");
+      setLoading(false);
     }
   };
 
   const handleUpload = async () => {
     try {
       if (!selectedFile) {
-        setMessage("Please choose a file first");
+        showMessage("Please choose a file first.", "error");
         return;
       }
 
-      setMessage("Creating upload URL...");
+      setLoading(true);
+      showMessage("Preparing secure upload...", "info");
 
       const uploadUrlResponse = await fetch(`${API_BASE_URL}/upload-url`, {
         method: "POST",
@@ -109,7 +128,7 @@ function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          fileName: selectedFile.name,
+          fileName: selectedFile.name.trim(),
           contentType: selectedFile.type || "application/octet-stream",
         }),
       });
@@ -117,10 +136,10 @@ function App() {
       const uploadUrlData = await uploadUrlResponse.json();
 
       if (!uploadUrlResponse.ok) {
-        throw new Error(uploadUrlData.error || "Failed to create upload URL");
+        throw new Error(uploadUrlData.error || "Failed to create upload URL.");
       }
 
-      setMessage("Uploading file to S3...");
+      showMessage("Uploading to encrypted cloud storage...", "info");
 
       const s3UploadResponse = await fetch(uploadUrlData.uploadUrl, {
         method: "PUT",
@@ -131,10 +150,10 @@ function App() {
       });
 
       if (!s3UploadResponse.ok) {
-        throw new Error("Failed to upload file to S3");
+        throw new Error("Failed to upload file to S3.");
       }
 
-      setMessage("Confirming upload...");
+      showMessage("Finalizing upload...", "info");
 
       const confirmResponse = await fetch(
         `${API_BASE_URL}/files/${uploadUrlData.fileId}/confirm`,
@@ -147,21 +166,26 @@ function App() {
       const confirmData = await confirmResponse.json();
 
       if (!confirmResponse.ok) {
-        throw new Error(confirmData.error || "Failed to confirm upload");
+        throw new Error(confirmData.error || "Failed to confirm upload.");
       }
 
       setSelectedFile(null);
-      setMessage("Upload successful!");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+
       await fetchFiles();
+      showMessage("File uploaded successfully.", "success");
     } catch (error) {
       console.error(error);
-      setMessage(error.message);
+      showMessage(error.message, "error");
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleDownload = async (fileId) => {
     try {
-      setMessage("Creating download URL...");
+      setLoading(true);
+      showMessage("Creating secure download link...", "info");
 
       const response = await fetch(`${API_BASE_URL}/download-url/${fileId}`, {
         headers: authHeaders(),
@@ -170,20 +194,26 @@ function App() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to create download URL");
+        throw new Error(data.error || "Failed to create download URL.");
       }
 
-      window.open(data.downloadUrl, "_blank");
-      setMessage("");
+      window.open(data.downloadUrl, "_blank", "noopener,noreferrer");
+      showMessage("Download link opened.", "success");
     } catch (error) {
       console.error(error);
-      setMessage(error.message);
+      showMessage(error.message, "error");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleDelete = async (fileId) => {
+  const handleDelete = async (fileId, fileName) => {
+    const confirmed = window.confirm(`Delete "${fileName || fileId}"?`);
+    if (!confirmed) return;
+
     try {
-      setMessage("Deleting file...");
+      setLoading(true);
+      showMessage("Deleting file...", "info");
 
       const response = await fetch(`${API_BASE_URL}/files/${fileId}`, {
         method: "DELETE",
@@ -193,253 +223,203 @@ function App() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to delete file");
+        throw new Error(data.error || "Failed to delete file.");
       }
 
-      setMessage("File deleted");
       await fetchFiles();
+      showMessage("File deleted.", "success");
     } catch (error) {
       console.error(error);
-      setMessage(error.message);
+      showMessage(error.message, "error");
+    } finally {
+      setLoading(false);
     }
   };
 
   if (!isLoggedIn) {
     return (
-      <Page>
-        <Card width="420px">
-          <h1 style={styles.title}>SecureVault</h1>
-          <p style={styles.subtitle}>Secure cloud file storage</p>
+      <main className="auth-page">
+        <section className="auth-hero">
+          <div className="brand-pill">🔐 SecureVault</div>
+          <h1>Private cloud storage for your important files.</h1>
+          <p>
+            Upload, manage, and download files securely using AWS Cognito, S3,
+            DynamoDB, ECS, API Gateway, and Terraform.
+          </p>
 
+          <div className="hero-grid">
+            <div>✅ JWT protected API</div>
+            <div>✅ Private S3 storage</div>
+            <div>✅ User-isolated files</div>
+            <div>✅ Cloud-native backend</div>
+          </div>
+        </section>
+
+        <section className="auth-card">
+          <h2>Sign in</h2>
+          <p className="muted">Access your SecureVault dashboard.</p>
+
+          <label>Email</label>
           <input
             type="email"
-            placeholder="Email"
+            placeholder="testuser@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            style={styles.input}
           />
 
+          <label>Password</label>
           <input
             type="password"
-            placeholder="Password"
+            placeholder="Enter password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            style={styles.input}
+            onKeyDown={(e) => e.key === "Enter" && handleLogin()}
           />
 
-          <button onClick={handleLogin} style={styles.primaryButton}>
-            Login
+          <button className="primary-btn" onClick={handleLogin} disabled={loading}>
+            {loading ? "Signing in..." : "Sign in"}
           </button>
 
-          {message && <p style={styles.message}>{message}</p>}
-        </Card>
-      </Page>
+          {message && <StatusMessage type={messageType} text={message} />}
+        </section>
+      </main>
     );
   }
 
   return (
-    <Page>
-      <div style={styles.dashboard}>
-        <div style={styles.header}>
-          <div>
-            <h1 style={styles.title}>SecureVault</h1>
-            <p style={styles.subtitle}>Authenticated file dashboard</p>
-          </div>
-
-          <button onClick={handleLogout} style={styles.secondaryButton}>
-            Logout
-          </button>
+    <main className="dashboard-page">
+      <nav className="topbar">
+        <div>
+          <div className="brand">🔐 SecureVault</div>
+          <p>Secure file dashboard</p>
         </div>
 
-        <Card width="100%">
-          <h2 style={styles.sectionTitle}>Upload file</h2>
+        <button className="ghost-btn" onClick={handleLogout}>
+          Logout
+        </button>
+      </nav>
 
-          <input
-            type="file"
-            onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-            style={styles.fileInput}
-          />
+      <section className="dashboard-layout">
+        <div className="upload-panel">
+          <div className="panel-header">
+            <div>
+              <h2>Upload a file</h2>
+              <p>Files are uploaded directly to private S3 storage.</p>
+            </div>
+          </div>
 
-          <button onClick={handleUpload} style={styles.primaryButton}>
-            Upload
+          <div className="upload-box">
+            <div className="upload-icon">📄</div>
+            <div>
+              <strong>{selectedFile ? selectedFile.name : "Choose a file"}</strong>
+              <p>
+                {selectedFile
+                  ? `${formatBytes(selectedFile.size)} • ${
+                      selectedFile.type || "Unknown type"
+                    }`
+                  : "PDF, text, images, documents, and more"}
+              </p>
+            </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+            />
+          </div>
+
+          <button className="primary-btn" onClick={handleUpload} disabled={loading}>
+            {loading ? "Working..." : "Upload securely"}
           </button>
 
-          {message && <p style={styles.message}>{message}</p>}
-        </Card>
+          {message && <StatusMessage type={messageType} text={message} />}
+        </div>
 
-        <Card width="100%">
-          <div style={styles.filesHeader}>
-            <h2 style={styles.sectionTitle}>My files</h2>
+        <div className="files-panel">
+          <div className="panel-header">
+            <div>
+              <h2>My files</h2>
+              <p>{files.length} file{files.length === 1 ? "" : "s"} stored</p>
+            </div>
 
-            <button onClick={() => fetchFiles()} style={styles.secondaryButton}>
+            <button className="ghost-btn" onClick={() => fetchFiles()} disabled={loading}>
               Refresh
             </button>
           </div>
 
           {files.length === 0 ? (
-            <p style={styles.subtitle}>No files uploaded yet.</p>
+            <div className="empty-state">
+              <div>🗂️</div>
+              <h3>No files yet</h3>
+              <p>Upload your first file to start using SecureVault.</p>
+            </div>
           ) : (
-            <div style={styles.fileList}>
+            <div className="file-list">
               {files.map((file) => (
-                <div key={file.fileId} style={styles.fileRow}>
-                  <div>
-                    <strong>{file.fileName || file.fileId}</strong>
-                    <p style={styles.fileMeta}>
-                      Status: {file.status || "unknown"}
-                    </p>
+                <article className="file-card" key={file.fileId}>
+                  <div className="file-info">
+                    <div className="file-avatar">{getFileIcon(file.fileName)}</div>
+
+                    <div>
+                      <h3>{file.fileName || file.fileId}</h3>
+                      <div className="file-meta">
+                        <span className={`badge ${file.status === "uploaded" ? "ok" : "warn"}`}>
+                          {file.status || "unknown"}
+                        </span>
+                        {file.uploadedAt && <span>{formatDate(file.uploadedAt)}</span>}
+                      </div>
+                    </div>
                   </div>
 
-                  <div style={styles.fileActions}>
+                  <div className="file-actions">
                     <button
+                      className="secondary-btn"
                       onClick={() => handleDownload(file.fileId)}
-                      style={styles.smallButton}
+                      disabled={loading || file.status !== "uploaded"}
                     >
                       Download
                     </button>
 
                     <button
-                      onClick={() => handleDelete(file.fileId)}
-                      style={styles.dangerButton}
+                      className="danger-btn"
+                      onClick={() => handleDelete(file.fileId, file.fileName)}
+                      disabled={loading}
                     >
                       Delete
                     </button>
                   </div>
-                </div>
+                </article>
               ))}
             </div>
           )}
-        </Card>
-      </div>
-    </Page>
+        </div>
+      </section>
+    </main>
   );
 }
 
-function Page({ children }) {
-  return <div style={styles.page}>{children}</div>;
+function StatusMessage({ type, text }) {
+  return <div className={`status-message ${type}`}>{text}</div>;
 }
 
-function Card({ children, width }) {
-  return <div style={{ ...styles.card, width }}>{children}</div>;
+function formatDate(value) {
+  return new Date(value).toLocaleString();
 }
 
-const styles = {
-  page: {
-    minHeight: "100vh",
-    background: "#0f172a",
-    color: "white",
-    fontFamily: "Arial",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: "32px",
-  },
-  dashboard: {
-    width: "100%",
-    maxWidth: "900px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "24px",
-  },
-  card: {
-    padding: "32px",
-    borderRadius: "16px",
-    background: "#1e293b",
-    boxSizing: "border-box",
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  title: {
-    margin: "0 0 8px",
-    fontSize: "40px",
-  },
-  subtitle: {
-    margin: "0 0 24px",
-    color: "#94a3b8",
-  },
-  sectionTitle: {
-    margin: "0 0 16px",
-  },
-  input: {
-    width: "100%",
-    padding: "12px",
-    marginBottom: "16px",
-    borderRadius: "8px",
-    border: "none",
-    boxSizing: "border-box",
-    fontSize: "16px",
-  },
-  fileInput: {
-    display: "block",
-    marginBottom: "16px",
-  },
-  primaryButton: {
-    width: "100%",
-    padding: "12px",
-    borderRadius: "8px",
-    border: "none",
-    background: "#3b82f6",
-    color: "white",
-    fontWeight: "bold",
-    cursor: "pointer",
-  },
-  secondaryButton: {
-    padding: "10px 14px",
-    borderRadius: "8px",
-    border: "1px solid #475569",
-    background: "transparent",
-    color: "white",
-    cursor: "pointer",
-  },
-  smallButton: {
-    padding: "8px 12px",
-    borderRadius: "8px",
-    border: "none",
-    background: "#2563eb",
-    color: "white",
-    cursor: "pointer",
-  },
-  dangerButton: {
-    padding: "8px 12px",
-    borderRadius: "8px",
-    border: "none",
-    background: "#dc2626",
-    color: "white",
-    cursor: "pointer",
-  },
-  message: {
-    marginTop: "16px",
-    color: "#94a3b8",
-  },
-  filesHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  fileList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "12px",
-  },
-  fileRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "16px",
-    borderRadius: "12px",
-    background: "#0f172a",
-  },
-  fileMeta: {
-    margin: "4px 0 0",
-    color: "#94a3b8",
-    fontSize: "14px",
-  },
-  fileActions: {
-    display: "flex",
-    gap: "8px",
-  },
-};
+function formatBytes(bytes) {
+  if (!bytes) return "0 B";
+  const sizes = ["B", "KB", "MB", "GB"];
+  const index = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, index)).toFixed(1)} ${sizes[index]}`;
+}
+
+function getFileIcon(fileName = "") {
+  const name = fileName.toLowerCase();
+  if (name.endsWith(".pdf")) return "PDF";
+  if (name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg")) return "IMG";
+  if (name.endsWith(".txt")) return "TXT";
+  if (name.endsWith(".doc") || name.endsWith(".docx")) return "DOC";
+  return "FILE";
+}
 
 export default App;
