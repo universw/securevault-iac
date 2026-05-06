@@ -10,4 +10,4 @@ terraform.tfvars
 .terraform.lock.hcl
 
 # Logs
-npm-debug.log
+npm-debug.log*.txt
