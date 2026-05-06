@@ -31,6 +31,25 @@ resource "aws_ecs_task_definition" "securevault_backend_task" {
 
       essential = true
 
+      environment = [
+        {
+          name  = "AWS_REGION"
+          value = var.aws_region
+        },
+        {
+          name  = "FILES_BUCKET"
+          value = aws_s3_bucket.securevault_files.bucket
+        },
+        {
+          name  = "FILES_TABLE"
+          value = aws_dynamodb_table.securevault_files_metadata.name
+        },
+        {
+          name  = "NODE_ENV"
+          value = "dev"
+        }
+      ]
+
       portMappings = [
         {
           containerPort = 3000
@@ -50,6 +69,7 @@ resource "aws_ecs_task_definition" "securevault_backend_task" {
     }
   ])
 }
+
 resource "aws_ecs_service" "securevault_backend_service" {
   name            = "securevault-iac-dev-backend-service"
   cluster         = aws_ecs_cluster.securevault_cluster.id
