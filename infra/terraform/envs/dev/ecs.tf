@@ -26,9 +26,8 @@ resource "aws_ecs_task_definition" "securevault_backend_task" {
 
   container_definitions = jsonencode([
     {
-      name  = "securevault-backend"
-      image = "${aws_ecr_repository.securevault_backend.repository_url}:latest"
-
+      name      = "securevault-backend"
+      image     = "${aws_ecr_repository.securevault_backend.repository_url}:latest"
       essential = true
 
       environment = [
@@ -54,6 +53,7 @@ resource "aws_ecs_task_definition" "securevault_backend_task" {
         {
           containerPort = 3000
           hostPort      = 3000
+          protocol      = "tcp"
         }
       ]
 
@@ -68,6 +68,12 @@ resource "aws_ecs_task_definition" "securevault_backend_task" {
       }
     }
   ])
+
+  tags = {
+    Project     = "SecureVault"
+    Environment = "dev"
+    ManagedBy   = "Terraform"
+  }
 }
 
 resource "aws_ecs_service" "securevault_backend_service" {
@@ -78,11 +84,25 @@ resource "aws_ecs_service" "securevault_backend_service" {
 
   desired_count = 1
 
+  load_balancer {
+    target_group_arn = aws_lb_target_group.securevault_backend_tg.arn
+    container_name   = "securevault-backend"
+    container_port   = 3000
+  }
+
   network_configuration {
-    subnets          = [aws_subnet.securevault_public_subnet.id]
+    subnets = [
+      aws_subnet.securevault_public_subnet.id,
+      aws_subnet.securevault_public_subnet_2.id
+    ]
+
     security_groups  = [aws_security_group.securevault_backend_sg.id]
     assign_public_ip = true
   }
+
+  depends_on = [
+    aws_lb_listener.securevault_http_listener
+  ]
 
   tags = {
     Project     = "SecureVault"

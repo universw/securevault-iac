@@ -25,6 +25,20 @@ resource "aws_subnet" "securevault_public_subnet" {
   }
 }
 
+resource "aws_subnet" "securevault_public_subnet_2" {
+  vpc_id                  = aws_vpc.securevault_vpc.id
+  cidr_block              = "10.0.2.0/24"
+  availability_zone       = "ap-northeast-1c"
+  map_public_ip_on_launch = true
+
+  tags = {
+    Project     = "SecureVault"
+    Environment = "dev"
+    ManagedBy   = "Terraform"
+    Name        = "securevault-iac-dev-public-subnet-2"
+  }
+}
+
 resource "aws_internet_gateway" "securevault_igw" {
   vpc_id = aws_vpc.securevault_vpc.id
 
@@ -57,17 +71,22 @@ resource "aws_route_table_association" "securevault_public_assoc" {
   route_table_id = aws_route_table.securevault_public_rt.id
 }
 
+resource "aws_route_table_association" "securevault_public_assoc_2" {
+  subnet_id      = aws_subnet.securevault_public_subnet_2.id
+  route_table_id = aws_route_table.securevault_public_rt.id
+}
+
 resource "aws_security_group" "securevault_backend_sg" {
   name        = "securevault-iac-dev-backend-sg"
   description = "Allow HTTP access to SecureVault backend"
   vpc_id      = aws_vpc.securevault_vpc.id
 
   ingress {
-    from_port   = 3000
-    to_port     = 3000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow backend API access"
+    from_port       = 3000
+    to_port         = 3000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.securevault_alb_sg.id]
+    description     = "Allow backend API access from ALB"
   }
 
   egress {
