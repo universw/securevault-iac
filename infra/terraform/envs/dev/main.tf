@@ -57,9 +57,9 @@ resource "aws_s3_bucket_cors_configuration" "securevault_files_cors" {
     allowed_headers = ["*"]
     allowed_methods = ["GET", "PUT", "POST", "DELETE", "HEAD"]
     allowed_origins = [
-  "http://localhost:5173",
-  "https://securevault-iac.vercel.app"
-]
+      "http://localhost:5173",
+      "https://securevault-iac.vercel.app"
+    ]
     expose_headers  = ["ETag"]
     max_age_seconds = 3000
   }
