@@ -44,6 +44,14 @@ resource "aws_ecs_task_definition" "securevault_backend_task" {
           value = aws_dynamodb_table.securevault_files_metadata.name
         },
         {
+          name  = "COGNITO_USER_POOL_ID"
+          value = aws_cognito_user_pool.securevault_users.id
+        },
+        {
+          name  = "COGNITO_CLIENT_ID"
+          value = aws_cognito_user_pool_client.securevault_app_client.id
+        },
+        {
           name  = "NODE_ENV"
           value = "dev"
         }

@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const { randomUUID } = require("crypto");
+const { CognitoJwtVerifier } = require("aws-jwt-verify");
 
 const {
   S3Client,
@@ -25,12 +26,48 @@ const PORT = process.env.PORT || 3000;
 const AWS_REGION = process.env.AWS_REGION || "ap-northeast-1";
 const FILES_BUCKET = process.env.FILES_BUCKET;
 const FILES_TABLE = process.env.FILES_TABLE;
+const COGNITO_USER_POOL_ID = process.env.COGNITO_USER_POOL_ID;
+const COGNITO_CLIENT_ID = process.env.COGNITO_CLIENT_ID;
 
 const s3 = new S3Client({ region: AWS_REGION });
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: AWS_REGION }));
 
+const verifier = CognitoJwtVerifier.create({
+  userPoolId: COGNITO_USER_POOL_ID,
+  tokenUse: "id",
+  clientId: COGNITO_CLIENT_ID,
+});
+
 app.use(cors());
 app.use(express.json());
+
+async function authenticate(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Missing or invalid Authorization header" });
+    }
+
+    const token = authHeader.split(" ")[1];
+    const payload = await verifier.verify(token);
+
+    req.user = {
+      userId: payload.sub,
+      email: payload.email,
+      username: payload["cognito:username"],
+    };
+
+    next();
+  } catch (error) {
+    console.error("auth error:", error);
+    res.status(401).json({ error: "Unauthorized" });
+  }
+}
+
+function getAuthenticatedUserId(req) {
+  return req.user.userId;
+}
 
 app.get("/health", (req, res) => {
   res.json({
@@ -40,13 +77,14 @@ app.get("/health", (req, res) => {
   });
 });
 
-app.post("/upload-url", async (req, res) => {
+app.post("/upload-url", authenticate, async (req, res) => {
   try {
-    const { userId, fileName, contentType } = req.body;
+    const { fileName, contentType } = req.body;
+    const userId = getAuthenticatedUserId(req);
 
-    if (!userId || !fileName || !contentType) {
+    if (!fileName || !contentType) {
       return res.status(400).json({
-        error: "userId, fileName, and contentType are required",
+        error: "fileName and contentType are required",
       });
     }
 
@@ -88,9 +126,10 @@ app.post("/upload-url", async (req, res) => {
   }
 });
 
-app.post("/files/:userId/:fileId/confirm", async (req, res) => {
+app.post("/files/:fileId/confirm", authenticate, async (req, res) => {
   try {
-    const { userId, fileId } = req.params;
+    const { fileId } = req.params;
+    const userId = getAuthenticatedUserId(req);
 
     await ddb.send(
       new UpdateCommand({
@@ -119,9 +158,10 @@ app.post("/files/:userId/:fileId/confirm", async (req, res) => {
   }
 });
 
-app.get("/download-url/:userId/:fileId", async (req, res) => {
+app.get("/download-url/:fileId", authenticate, async (req, res) => {
   try {
-    const { userId, fileId } = req.params;
+    const { fileId } = req.params;
+    const userId = getAuthenticatedUserId(req);
 
     const result = await ddb.send(
       new GetCommand({
@@ -156,9 +196,9 @@ app.get("/download-url/:userId/:fileId", async (req, res) => {
   }
 });
 
-app.get("/files/:userId", async (req, res) => {
+app.get("/files", authenticate, async (req, res) => {
   try {
-    const { userId } = req.params;
+    const userId = getAuthenticatedUserId(req);
 
     const result = await ddb.send(
       new QueryCommand({
@@ -177,19 +217,26 @@ app.get("/files/:userId", async (req, res) => {
   }
 });
 
-app.delete("/files/:userId/:fileId", async (req, res) => {
+app.delete("/files/:fileId", authenticate, async (req, res) => {
   try {
-    const { userId, fileId } = req.params;
-    const { s3Key } = req.body;
+    const { fileId } = req.params;
+    const userId = getAuthenticatedUserId(req);
 
-    if (!s3Key) {
-      return res.status(400).json({ error: "s3Key is required" });
+    const result = await ddb.send(
+      new GetCommand({
+        TableName: FILES_TABLE,
+        Key: { userId, fileId },
+      })
+    );
+
+    if (!result.Item) {
+      return res.status(404).json({ error: "File not found" });
     }
 
     await s3.send(
       new DeleteObjectCommand({
         Bucket: FILES_BUCKET,
-        Key: s3Key,
+        Key: result.Item.s3Key,
       })
     );
 
@@ -200,7 +247,7 @@ app.delete("/files/:userId/:fileId", async (req, res) => {
       })
     );
 
-    res.json({ deleted: true });
+    res.json({ deleted: true, fileId });
   } catch (error) {
     console.error("delete file error:", error);
     res.status(500).json({ error: "Failed to delete file" });
