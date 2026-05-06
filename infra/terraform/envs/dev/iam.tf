@@ -49,3 +49,7 @@ resource "aws_iam_role_policy_attachment" "securevault_backend_policy_attachment
   role       = aws_iam_role.securevault_backend_task_role.name
   policy_arn = aws_iam_policy.securevault_backend_policy.arn
 }
+resource "aws_iam_role_policy_attachment" "securevault_ecs_execution_policy_attachment" {
+  role       = aws_iam_role.securevault_backend_task_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
