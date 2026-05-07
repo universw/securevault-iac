@@ -9,6 +9,12 @@
 *.njsproj
 *.sln
 
+# Claude Code / IDE
+.claude/
+.agents/
+*.claude.md
+.claude-code/
+
 # Environment files
 .env
 .env.*
