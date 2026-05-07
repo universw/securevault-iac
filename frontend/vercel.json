@@ -52,14 +52,6 @@
     }
   ],
 
-  "redirects": [
-    {
-      "source": "/index.html",
-      "destination": "/",
-      "permanent": true
-    }
-  ],
-
   "env": {
     "VITE_API_BASE_URL": "@vite_api_base_url",
     "VITE_COGNITO_USER_POOL_ID": "@vite_cognito_user_pool_id",
