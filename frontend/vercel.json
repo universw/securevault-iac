@@ -50,12 +50,5 @@
         }
       ]
     }
-  ],
-
-  "env": {
-    "VITE_API_BASE_URL": "@vite_api_base_url",
-    "VITE_COGNITO_USER_POOL_ID": "@vite_cognito_user_pool_id",
-    "VITE_COGNITO_CLIENT_ID": "@vite_cognito_client_id",
-    "VITE_AWS_REGION": "@vite_aws_region"
-  }
+  ]
 }
