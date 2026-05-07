@@ -1,37 +1,27 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  CognitoUserPool,
-  CognitoUser,
-  AuthenticationDetails,
-} from "amazon-cognito-identity-js";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { AuthProvider } from "./AuthContext";
+import AuthContext from "./AuthContext";
+import LoginForm from "./LoginForm";
+import SignupForm from "./SignupForm";
+import EmailVerificationForm from "./EmailVerificationForm";
+import ForgotPasswordForm from "./ForgotPasswordForm";
 import "./App.css";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? "/api" : ""))
   .replace(/\/$/, "");
-const COGNITO_USER_POOL_ID = import.meta.env.VITE_COGNITO_USER_POOL_ID;
-const COGNITO_CLIENT_ID = import.meta.env.VITE_COGNITO_CLIENT_ID;
 const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 
 const missingConfig = [
   !API_BASE_URL && "VITE_API_BASE_URL",
-  !COGNITO_USER_POOL_ID && "VITE_COGNITO_USER_POOL_ID",
-  !COGNITO_CLIENT_ID && "VITE_COGNITO_CLIENT_ID",
+  !import.meta.env.VITE_COGNITO_USER_POOL_ID && "VITE_COGNITO_USER_POOL_ID",
+  !import.meta.env.VITE_COGNITO_CLIENT_ID && "VITE_COGNITO_CLIENT_ID",
 ].filter(Boolean);
 
-const poolData = {
-  UserPoolId: COGNITO_USER_POOL_ID,
-  ClientId: COGNITO_CLIENT_ID,
-};
-
-const userPool = missingConfig.length === 0 ? new CognitoUserPool(poolData) : null;
-
-function App() {
+function AppContent() {
+  const { isLoggedIn, idToken, authFlow, logout } = useContext(AuthContext);
   const fileInputRef = useRef(null);
   const dragDepth = useRef(0);
 
-  const [email, setEmail] = useState("testuser@example.com");
-  const [password, setPassword] = useState("");
-  const [idToken, setIdToken] = useState(sessionStorage.getItem("idToken") || "");
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
   const [files, setFiles] = useState([]);
@@ -44,8 +34,6 @@ function App() {
   const [selectedVaultFile, setSelectedVaultFile] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [preview, setPreview] = useState(null);
-
-  const isLoggedIn = Boolean(idToken);
   const uploadedCount = files.filter((file) => file.status === "uploaded").length;
   const pendingCount = files.length - uploadedCount;
   const latestFile = getLatestFile(files);
@@ -148,59 +136,8 @@ function App() {
     setSelectedVaultFile(freshFile || null);
   }, [files, selectedVaultFile]);
 
-  const handleLogin = () => {
-    if (!email || !password) {
-      showMessage("Please enter email and password.", "error");
-      return;
-    }
-
-    try {
-      ensureConfigured();
-      setLoading(true);
-      showMessage("Signing you in...", "info");
-    } catch (error) {
-      showMessage(error.message, "error");
-      return;
-    }
-
-    const authDetails = new AuthenticationDetails({
-      Username: email,
-      Password: password,
-    });
-
-    const cognitoUser = new CognitoUser({
-      Username: email,
-      Pool: userPool,
-    });
-
-    cognitoUser.authenticateUser(authDetails, {
-      onSuccess: (result) => {
-        const token = result.getIdToken().getJwtToken();
-        sessionStorage.setItem("idToken", token);
-        setIdToken(token);
-        setPassword("");
-        showMessage("Login successful.", "success");
-        setLoading(false);
-      },
-      onFailure: (err) => {
-        console.error(err);
-        showMessage(err.message || "Login failed.", "error");
-        setLoading(false);
-      },
-      newPasswordRequired: () => {
-        showMessage("This account requires a password change before login.", "error");
-        setLoading(false);
-      },
-      mfaRequired: () => {
-        showMessage("MFA is required, but this client does not support MFA yet.", "error");
-        setLoading(false);
-      },
-    });
-  };
-
   const handleLogout = () => {
-    sessionStorage.removeItem("idToken");
-    setIdToken("");
+    logout();
     setFiles([]);
     setSelectedFile(null);
     setSearchTerm("");
@@ -481,39 +418,15 @@ function App() {
             <span className="status-dot" aria-hidden="true" />
             <span>Secure session</span>
           </div>
-          <h2>Sign in to your vault</h2>
-          <p className="muted">Use your Cognito account to manage protected files.</p>
 
-          <label htmlFor="email">Email</label>
-          <input
-            id="email"
-            type="email"
-            placeholder="testuser@example.com"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            placeholder="Enter password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-          />
-
-          <button className="primary-btn" onClick={handleLogin} disabled={loading}>
-            {loading ? "Signing in" : "Sign in"}
-          </button>
+          {authFlow === "login" && <LoginForm />}
+          {authFlow === "signup" && <SignupForm />}
+          {authFlow === "verify-email" && <EmailVerificationForm />}
+          {authFlow === "forgot-password" && <ForgotPasswordForm />}
 
           {missingConfig.length > 0 && (
             <p className="config-note">Configure the frontend environment before signing in.</p>
           )}
-
-          {message && <StatusMessage type={messageType} text={message} />}
         </section>
       </main>
     );
@@ -1028,4 +941,10 @@ function getFileIcon(fileName = "") {
   return "FILE";
 }
 
-export default App;
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
+}
